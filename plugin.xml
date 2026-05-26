@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension
+         point="org.eclipse.ui.newWizards">
+      <category
+            id="com.aitial.glist.category"
+            name="GlistApp">
+      </category>
+      <wizard
+            id="com.aitial.glist.wizards.GlistAppProjectWizard"
+            name="GlistApp Project"
+            category="com.aitial.glist.category"
+            class="com.aitial.glist.wizards.GlistAppProjectWizard"
+            project="true"
+            icon="icons/sample.png">
+         <description>
+            Create a new high-performance GlistApp project.
+         </description>
+      </wizard>
+   </extension>
+   <extension
+         point="org.eclipse.ui.perspectiveExtensions">
+      <perspectiveExtension
+            targetID="org.eclipse.cdt.ui.CPerspective">
+         <newWizardShortcut
+               id="com.aitial.glist.wizards.GlistAppProjectWizard">
+         </newWizardShortcut>
+      </perspectiveExtension>
+      <perspectiveExtension
+            targetID="org.eclipse.pde.ui.PDEPerspective">
+         <newWizardShortcut
+               id="com.aitial.glist.wizards.GlistAppProjectWizard">
+         </newWizardShortcut>
+      </perspectiveExtension>
+   </extension>
+   <extension
+         point="org.eclipse.ui.startup">
+      <startup
+            class="com.aitial.glist.wizards.GlistStartup">
+      </startup>
+   </extension>
+</plugin>
