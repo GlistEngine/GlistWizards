@@ -1,15 +1,10 @@
 package com.aitial.glist.wizards;
 
-import java.io.File;
+import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 
-import org.eclipse.core.resources.IProject;
-import org.eclipse.core.resources.IProjectDescription;
-import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.IWorkspaceRunnable;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
@@ -26,6 +21,10 @@ import org.eclipse.ui.IStartup;
  * relative to the workspace location) and imports any projects we find that
  * aren't already in the workspace.
  *
+ * Delegates to {@link GlistAppImporter} for app imports so the same logic
+ * (import + ensure run config) runs whether the project was just freshly
+ * created by the wizard or was already on disk from a previous install.
+ *
  * This is what makes the shipped workspace user-agnostic: nothing baked-in,
  * paths discovered each boot from where the bundle actually lives.
  */
@@ -36,7 +35,7 @@ public class GlistStartup implements IStartup {
 	@Override
 	public void earlyStartup() {
 		try {
-			IWorkspaceRunnable op = monitor -> importAll(monitor);
+			IWorkspaceRunnable op = this::importAll;
 			ResourcesPlugin.getWorkspace().run(op, new NullProgressMonitor());
 		} catch (CoreException e) {
 			LOG.log(new Status(IStatus.ERROR, Activator.PLUGIN_ID, "GlistStartup failed", e));
@@ -44,63 +43,42 @@ public class GlistStartup implements IStartup {
 	}
 
 	private void importAll(IProgressMonitor monitor) {
-		List<Path> candidates = new ArrayList<>();
-
+		// Engine first (apps depend on it as a project reference).
 		Path engine = GlistPaths.engineProjectDir();
 		if (Files.isRegularFile(engine.resolve(".project"))) {
-			candidates.add(engine);
-		}
-
-		Path apps = GlistPaths.appsRoot();
-		if (Files.isDirectory(apps)) {
-			try (DirectoryStream<Path> stream = Files.newDirectoryStream(apps)) {
-				for (Path child : stream) {
-					if (Files.isDirectory(child) && Files.isRegularFile(child.resolve(".project"))) {
-						candidates.add(child);
-					}
-				}
-			} catch (Exception e) {
+			try {
+				GlistAppImporter.importEngine(engine, monitor);
+				LOG.log(new Status(IStatus.INFO, Activator.PLUGIN_ID,
+						"Auto-imported engine from " + engine));
+			} catch (CoreException e) {
 				LOG.log(new Status(IStatus.WARNING, Activator.PLUGIN_ID,
-						"Could not scan apps root " + apps, e));
+						"Could not import engine at " + engine, e));
 			}
 		}
 
-		IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
-		for (Path projectDir : candidates) {
-			importIfMissing(root, projectDir, monitor);
+		// Then every directory under myglistapps/ that has a .project file.
+		Path apps = GlistPaths.appsRoot();
+		if (!Files.isDirectory(apps)) {
+			return;
 		}
-	}
+		try (DirectoryStream<Path> stream = Files.newDirectoryStream(apps)) {
+			for (Path child : stream) {
+				if (!Files.isDirectory(child)) continue;
+				if (!Files.isRegularFile(child.resolve(".project"))) continue;
 
-	private void importIfMissing(IWorkspaceRoot root, Path projectDir, IProgressMonitor monitor) {
-		try {
-			org.eclipse.core.runtime.IPath descPath =
-					org.eclipse.core.runtime.IPath.fromOSString(
-							projectDir.toFile().getAbsolutePath()).append(".project");
-			IProjectDescription description = ResourcesPlugin.getWorkspace().loadProjectDescription(descPath);
-			String name = description.getName();
-
-			IProject existing = root.getProject(name);
-			if (existing.exists()) {
-				if (!existing.isOpen()) {
-					existing.open(monitor);
-				}
-				File existingLoc = existing.getLocation() != null ? existing.getLocation().toFile() : null;
-				File wantedLoc = projectDir.toFile().getAbsoluteFile();
-				if (existingLoc != null && !existingLoc.equals(wantedLoc)) {
+				String name = child.getFileName().toString();
+				try {
+					GlistAppImporter.importOrCloneApp(name, monitor);
+					LOG.log(new Status(IStatus.INFO, Activator.PLUGIN_ID,
+							"Auto-imported app: " + name + " -> " + child));
+				} catch (Exception e) {
 					LOG.log(new Status(IStatus.WARNING, Activator.PLUGIN_ID,
-							"Project '" + name + "' already in workspace at " + existingLoc
-									+ " but expected " + wantedLoc + " — leaving as is."));
+							"Could not import app at " + child, e));
 				}
-				return;
 			}
-
-			existing.create(description, monitor);
-			existing.open(monitor);
-			LOG.log(new Status(IStatus.INFO, Activator.PLUGIN_ID,
-					"Auto-imported project: " + name + " -> " + projectDir));
-		} catch (CoreException e) {
+		} catch (IOException e) {
 			LOG.log(new Status(IStatus.WARNING, Activator.PLUGIN_ID,
-					"Could not import project at " + projectDir, e));
+					"Could not scan apps root " + apps, e));
 		}
 	}
 }
