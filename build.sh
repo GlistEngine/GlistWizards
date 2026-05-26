@@ -46,16 +46,23 @@ done
 SWT_JAR=$(ls "$PLUGINS"/org.eclipse.swt.cocoa.macosx.aarch64_*.jar "$PLUGINS"/org.eclipse.swt.cocoa.macosx.x86_64_*.jar "$PLUGINS"/org.eclipse.swt.win32.win32.x86_64_*.jar "$PLUGINS"/org.eclipse.swt.gtk.linux.x86_64_*.jar 2>/dev/null | head -1)
 [[ -n "$SWT_JAR" ]] && CP="$CP:$SWT_JAR"
 
-VERSION="1.2.0.$(date -u +%Y%m%d%H%M)"
+# Read the base version (x.y.z) from MANIFEST.MF so we don't drift if it's bumped.
+BASE_VERSION=$(grep '^Bundle-Version:' "$ROOT/META-INF/MANIFEST.MF" \
+    | sed -E 's/^Bundle-Version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+if [[ -z "$BASE_VERSION" ]]; then
+    echo "Could not parse Bundle-Version from MANIFEST.MF"; exit 1
+fi
+VERSION="${BASE_VERSION}.$(date -u +%Y%m%d%H%M)"
 JAR_NAME="com.aitial.glist.wizards_${VERSION}.jar"
 
 rm -rf "$ROOT/bin"
 mkdir "$ROOT/bin"
 "$JAVA_HOME/bin/javac" --release 21 -cp "$CP" -d "$ROOT/bin" "$ROOT"/src/com/aitial/glist/wizards/*.java
 
-# Stamp version into manifest before packing
+# Stamp version into manifest before packing. Match any "<base>.qualifier" so
+# this works regardless of the manifest's current base.
 TMP_MANIFEST=$(mktemp)
-sed "s/1\\.2\\.0\\.qualifier/${VERSION}/" "$ROOT/META-INF/MANIFEST.MF" > "$TMP_MANIFEST"
+sed -E "s/[0-9]+\.[0-9]+\.[0-9]+\.qualifier/${VERSION}/" "$ROOT/META-INF/MANIFEST.MF" > "$TMP_MANIFEST"
 
 (cd "$ROOT" && "$JAVA_HOME/bin/jar" cfm "$ROOT/${JAR_NAME}" "$TMP_MANIFEST" -C bin com -C . plugin.xml -C . icons)
 rm -f "$TMP_MANIFEST"

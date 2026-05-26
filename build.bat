@@ -50,9 +50,25 @@ for %%F in ("%PLUGINS%\org.eclipse.swt.win32.win32.x86_64_*.jar" ^
     if not "%%~F"=="" if exist "%%~F" if "!CP_SWT!"=="" set "CP_SWT=%%~F" & set "CP=!CP!;%%~F"
 )
 
+REM Read the base version (x.y.z) from MANIFEST.MF.
+set "BASE_VERSION="
+for /f "tokens=2" %%V in ('findstr /b "Bundle-Version:" "%ROOT%\META-INF\MANIFEST.MF"') do (
+    for /f "tokens=1 delims=." %%A in ("%%V") do (
+        for /f "tokens=2 delims=." %%B in ("%%V") do (
+            for /f "tokens=3 delims=." %%C in ("%%V") do (
+                set "BASE_VERSION=%%A.%%B.%%C"
+            )
+        )
+    )
+)
+if "%BASE_VERSION%"=="" (
+    echo Could not parse Bundle-Version from MANIFEST.MF
+    exit /b 1
+)
+
 REM Stamp a fresh version timestamp.
 for /f "tokens=2 delims==" %%T in ('wmic os get LocalDateTime /value ^| find "="') do set "TS=%%T"
-set "VERSION=1.2.0.%TS:~0,12%"
+set "VERSION=%BASE_VERSION%.%TS:~0,12%"
 set "JAR_NAME=com.aitial.glist.wizards_%VERSION%.jar"
 
 if exist "%ROOT%\bin" rmdir /s /q "%ROOT%\bin"
@@ -61,9 +77,9 @@ mkdir "%ROOT%\bin"
 "%JAVA_HOME%\bin\javac.exe" --release 21 -cp "%CP%" -d "%ROOT%\bin" "%ROOT%\src\com\aitial\glist\wizards\*.java"
 if errorlevel 1 exit /b 1
 
-REM Stamp version into manifest before packing.
+REM Stamp version into manifest before packing. Regex matches any "<base>.qualifier".
 set "TMP_MANIFEST=%TEMP%\glist-wizards-manifest.mf"
-powershell -NoProfile -Command "(Get-Content -Raw '%ROOT%\META-INF\MANIFEST.MF') -replace '1\.2\.0\.qualifier','%VERSION%' | Set-Content -NoNewline '%TMP_MANIFEST%'"
+powershell -NoProfile -Command "(Get-Content -Raw '%ROOT%\META-INF\MANIFEST.MF') -replace '\d+\.\d+\.\d+\.qualifier','%VERSION%' | Set-Content -NoNewline '%TMP_MANIFEST%'"
 
 pushd "%ROOT%"
 "%JAVA_HOME%\bin\jar.exe" cfm "%ROOT%\%JAR_NAME%" "%TMP_MANIFEST%" -C bin com -C . plugin.xml -C . icons

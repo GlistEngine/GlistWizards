@@ -102,9 +102,10 @@ public class GlistStartup implements IStartup {
 		}
 
 		try {
-			GlistAppImporter.importOrCloneApp("GlistApp", monitor);
+			IProject initial = GlistAppImporter.importOrCloneApp("GlistApp", monitor);
 			LOG.log(new Status(IStatus.INFO, Activator.PLUGIN_ID,
 					"Auto-created initial GlistApp under " + appsRoot));
+			GlistAppEditors.openCanvas(initial);
 		} catch (Exception e) {
 			LOG.log(new Status(IStatus.WARNING, Activator.PLUGIN_ID,
 					"Could not auto-create initial GlistApp", e));

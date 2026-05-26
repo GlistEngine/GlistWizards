@@ -111,6 +111,8 @@ public class GlistAppProjectWizard extends Wizard implements INewWizard {
 							+ sw);
 			return false;
 		}
+
+		GlistAppEditors.openCanvas(result[0]);
 		return true;
 	}
 }
