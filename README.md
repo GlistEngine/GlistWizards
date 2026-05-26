@@ -46,9 +46,15 @@ export ECLIPSE_HOME=~/dev/glist/zbin/glistzbin-macos/eclipse/eclipsecpp-arm64/Ec
 export ECLIPSE_HOME=~/dev/glist/zbin/glistzbin-macos/eclipse/eclipsecpp-x86_64/Eclipse.app/Contents/Eclipse
 ./build.sh
 
-# Windows / Linux (set to the directory containing plugins/, configuration/, eclipse.ini)
-export ECLIPSE_HOME=C:/dev/glist/zbin/glistzbin-win64/eclipse/eclipsecpp
+# Linux (set to the directory containing plugins/, configuration/, eclipse.ini)
+export ECLIPSE_HOME=~/dev/glist/zbin/glistzbin-linux/eclipse/eclipsecpp
 ./build.sh
+```
+
+```bat
+REM Windows
+set ECLIPSE_HOME=C:\dev\glist\zbin\glistzbin-win64\eclipse\eclipsecpp
+build.bat
 ```
 
 The compiled JAR is platform-neutral; build on whatever host is convenient
