@@ -38,4 +38,8 @@ public final class GlistPaths {
 	public static Path engineProjectDir() {
 		return glistHome().resolve("GlistEngine/engine");
 	}
+
+	public static Path pluginsRoot() {
+		return glistHome().resolve("glistplugins");
+	}
 }

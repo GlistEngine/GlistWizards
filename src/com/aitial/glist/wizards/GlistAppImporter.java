@@ -2,9 +2,12 @@ package com.aitial.glist.wizards;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IProjectDescription;
@@ -44,17 +47,51 @@ public final class GlistAppImporter {
 	 */
 	public static IProject importOrCloneApp(String name, IProgressMonitor monitor)
 			throws CoreException, IOException, InterruptedException {
+		return importOrCloneApp(name, null, monitor);
+	}
+
+	/**
+	 * Same as {@link #importOrCloneApp(String, IProgressMonitor)} but also
+	 * injects the given plugin list into the new project's CMakeLists.txt
+	 * {@code set(PLUGINS ...)} line. {@code plugins == null} means no edit.
+	 */
+	public static IProject importOrCloneApp(String name, List<String> plugins,
+			IProgressMonitor monitor)
+			throws CoreException, IOException, InterruptedException {
 
 		Path appsRoot = GlistPaths.appsRoot();
 		Files.createDirectories(appsRoot);
 		File dest = appsRoot.resolve(name).toFile();
 
+		boolean justCloned = false;
 		if (!dest.exists()) {
 			cloneFresh(dest);
+			justCloned = true;
+		}
+		if (justCloned && plugins != null && !plugins.isEmpty()) {
+			injectPluginsIntoCMake(new File(dest, "CMakeLists.txt"), plugins);
 		}
 		IProject project = ensureImported(dest, monitor);
 		ensureRunConfiguration(project);
 		return project;
+	}
+
+	private static void injectPluginsIntoCMake(File cmakeFile, List<String> plugins)
+			throws IOException {
+		if (!cmakeFile.exists() || plugins.isEmpty()) return;
+		Path path = cmakeFile.toPath();
+		List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+		List<String> out = new ArrayList<>(lines.size());
+		String pluginList = String.join(" ", plugins);
+		for (String line : lines) {
+			if (line.contains("set(PLUGINS")) {
+				line = line
+						.replace("set(PLUGINS)",  "set(PLUGINS " + pluginList + ")")
+						.replace("set(PLUGINS )", "set(PLUGINS " + pluginList + ")");
+			}
+			out.add(line);
+		}
+		Files.write(path, out, StandardCharsets.UTF_8);
 	}
 
 	/**
