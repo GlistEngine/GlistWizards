@@ -1,4 +1,7 @@
-bin/
-*.jar
+# Build output (every plugin emits these into its own dir)
+*/bin/
+*/*.jar
+
+# IDE / OS noise
 .idea/
 .DS_Store
