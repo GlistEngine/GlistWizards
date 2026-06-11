@@ -13,12 +13,13 @@
             category="com.aitial.glist.category"
             class="com.aitial.glist.wizards.GlistAppProjectWizard"
             project="true"
-            icon="icons/sample.png">
+            icon="icons/glistapp.png">
          <description>
-            Create a new high-performance GlistApp project.
+            Create a new high-performance GlistApp program.
          </description>
       </wizard>
    </extension>
+
    <extension
          point="org.eclipse.ui.perspectiveExtensions">
       <perspectiveExtension
@@ -33,11 +34,5 @@
                id="com.aitial.glist.wizards.GlistAppProjectWizard">
          </newWizardShortcut>
       </perspectiveExtension>
-   </extension>
-   <extension
-         point="org.eclipse.ui.startup">
-      <startup
-            class="com.aitial.glist.wizards.GlistStartup">
-      </startup>
    </extension>
 </plugin>

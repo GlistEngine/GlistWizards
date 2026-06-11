@@ -1,15 +1,15 @@
 Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
-Bundle-Name: GlistEngine Wizards
+Bundle-Name: Wizards
 Bundle-SymbolicName: com.aitial.glist.wizards;singleton:=true
-Bundle-Version: 1.3.0.qualifier
+Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: com.aitial.glist.wizards.Activator
-Bundle-Vendor: AİTİAL
+Bundle-Vendor: AITIAL
 Require-Bundle: org.eclipse.ui,
  org.eclipse.core.runtime,
- org.eclipse.core.resources,
- org.eclipse.ui.ide,
- org.eclipse.debug.core
+ org.eclipse.core.resources;bundle-version="3.23.200",
+ org.eclipse.ui.ide;bundle-version="3.23.0",
+ org.eclipse.debug.core;bundle-version="3.23.200"
 Bundle-RequiredExecutionEnvironment: JavaSE-21
 Automatic-Module-Name: com.aitial.glist.wizards
 Bundle-ActivationPolicy: lazy

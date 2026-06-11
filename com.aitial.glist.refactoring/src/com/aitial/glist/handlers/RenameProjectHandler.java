@@ -104,6 +104,21 @@ public class RenameProjectHandler extends AbstractHandler {
         try { 
             NullProgressMonitor monitor = new NullProgressMonitor(); 
  
+            // 1. FIRST PURGE: Wipe out stale caches using native Resource APIs while paths are active
+            if (project.isOpen()) {
+                org.eclipse.core.resources.IFolder buildFolder = project.getFolder("build");
+                org.eclipse.core.resources.IFolder underscoreBuildFolder = project.getFolder("_build");
+
+                // Deletes build dirs both synchronously from disk and Project Explorer tree mapping
+                if (buildFolder.exists()) {
+                    buildFolder.delete(org.eclipse.core.resources.IResource.FORCE, monitor);
+                }
+                if (underscoreBuildFolder.exists()) {
+                    underscoreBuildFolder.delete(org.eclipse.core.resources.IResource.FORCE, monitor);
+                }
+            }
+
+            // 2. MOVE OPERATION: Physically move the folder and rename project registry
             ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager(); 
             ILaunchConfiguration[] configs = launchManager.getLaunchConfigurations(); 
  
@@ -116,6 +131,7 @@ public class RenameProjectHandler extends AbstractHandler {
  
             project.move(description, org.eclipse.core.resources.IResource.FORCE, monitor); 
  
+            // 3. RUN CONFIGURATION INTERFACE UPDATES
             for (ILaunchConfiguration config : configs) { 
                 String configProjectAttr = config.getAttribute("org.eclipse.cdt.launch.PROJECT_ATTR", ""); 
                  
@@ -127,10 +143,14 @@ public class RenameProjectHandler extends AbstractHandler {
                     String binaryName = System.getProperty("os.name").toLowerCase().contains("win") ? "GlistApp.exe" : "GlistApp"; 
                     workingCopy.setAttribute("org.eclipse.cdt.launch.PROGRAM_NAME", "_build/Release/" + binaryName); 
                      
+                    workingCopy.setAttribute("org.eclipse.debug.core.ATTR_WORKING_DIRECTORY", "${project_loc:" + newName + "}");
                     workingCopy.rename(newName); 
                     workingCopy.doSave(); 
                 } 
             } 
+            
+            // Forces final structural delta verification over the migrated paths
+            project.refreshLocal(org.eclipse.core.resources.IResource.DEPTH_INFINITE, monitor);
  
         } catch (CoreException e) { 
             e.printStackTrace(); 

@@ -2,39 +2,40 @@ package com.aitial.glist.wizards;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import org.eclipse.core.resources.IProject;
-import org.eclipse.core.resources.IWorkspaceRunnable;
+import org.eclipse.core.resources.IProjectDescription;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.NullProgressMonitor;
-import org.eclipse.jface.dialogs.MessageDialog;
+import org.eclipse.debug.core.DebugPlugin;
+import org.eclipse.debug.core.ILaunchConfigurationType;
+import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
+import org.eclipse.debug.core.ILaunchManager;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.wizard.Wizard;
 import org.eclipse.jface.wizard.WizardPage;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
-import org.eclipse.swt.program.Program;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
-import org.eclipse.swt.widgets.Link;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.Table;
 import org.eclipse.swt.widgets.TableItem;
@@ -43,265 +44,409 @@ import org.eclipse.ui.INewWizard;
 import org.eclipse.ui.IWorkbench;
 
 /**
- * Wizard for new GlistApp projects.
- *
- * UI lets the user pick:
- *   - project name (auto-incremented to first free GlistApp-N)
- *   - project type (Game/Graphic, GUI, Console)
- *   - plugins from <GLIST_HOME>/glistplugins/ (descriptions parsed from each
- *     plugin's CMakeLists.txt)
- *
- * Backed by {@link GlistAppImporter#importOrCloneApp(String, List, org.eclipse.core.runtime.IProgressMonitor)}:
- * clones the appropriate upstream repo, resets git history, injects the
- * selected plugin list into CMakeLists.txt, imports the project, ensures a
- * CDT run configuration, and finally opens gCanvas.cpp/.h.
+ * Professional Wizard for GlistApp Programs.
+ * Strictly aligned with GlistEngine installation standards for Windows (C:\dev\glist) and Linux (~/dev/glist).
+ * Automatically resolves os-specific archetype paths for win64 and linux builds.
  */
 public class GlistAppProjectWizard extends Wizard implements INewWizard {
 
-	public enum ProjectType {
-		GAME_GRAPHIC, GUI, CONSOLE
-	}
+    private static final String DEV_ROOT;
+    private static final String TEMPLATE_ROOT;
+    private static final String DESTINATION_ROOT;
+    private static final String PLUGINS_ROOT;
+    
+    // Core structural paths resolved dynamically based on targeted cross-platform architecture
+    static {
+        String osName = System.getProperty("os.name").toLowerCase();
+        if (osName.contains("win")) {
+            // Windows Deployment Standard
+            DEV_ROOT = "C:" + File.separator + "dev" + File.separator + "glist";
+            TEMPLATE_ROOT = DEV_ROOT + File.separator + "zbin" + File.separator + "glistzbin-win64" + File.separator + "eclipse" + File.separator + "glistapp-template";
+        } else {
+            // Linux Ubuntu Deployment Standard (~/dev/glist) with glistzbin-linux
+            DEV_ROOT = System.getProperty("user.home") + File.separator + "dev" + File.separator + "glist";
+            TEMPLATE_ROOT = DEV_ROOT + File.separator + "zbin" + File.separator + "glistzbin-linux" + File.separator + "eclipse" + File.separator + "glistapp-template";
+        }
+        
+        DESTINATION_ROOT = DEV_ROOT + File.separator + "myglistapps";
+        PLUGINS_ROOT = DEV_ROOT + File.separator + "glistplugins";
+    }
+    
+    // Project Type Definitions
+    public enum ProjectType {
+        GAME_GRAPHIC,
+        GUI,
+        CONSOLE
+    }
 
-	private Text projectNameText;
-	private Table pluginsTable;
-	private ProjectType selectedType = ProjectType.GAME_GRAPHIC;
+    private Text projectNameText;
+    private Table pluginsTable;
+    private String finalProjectName;
+    private ProjectType selectedType = ProjectType.GAME_GRAPHIC; // Default fallback
 
-	public GlistAppProjectWizard() {
-		setWindowTitle("GlistEngine - Create New GlistApp");
-		setNeedsProgressMonitor(true);
-	}
+    public GlistAppProjectWizard() {
+        setWindowTitle("GlistEngine - Create New GlistApp");
+    }
 
-	@Override
-	public void init(IWorkbench workbench, IStructuredSelection selection) {}
+    @Override
+    public void init(IWorkbench workbench, IStructuredSelection selection) {}
 
-	@Override
-	public void addPages() {
-		addPage(new WizardPage("GlistAppPage") {
-			{
-				setTitle("GlistApp Program Details");
-				setDescription("Configure your program parameters, project type, and core framework plugins.");
-			}
+    @Override
+    public void addPages() {
+        addPage(new WizardPage("GlistAppPage") {
+            {
+                setTitle("GlistApp Program Details");
+                setDescription("Configure your program parameters, project type, and core framework plugins.");
+            }
 
-			@Override
-			public void createControl(Composite parent) {
-				Composite container = new Composite(parent, SWT.NONE);
-				container.setLayout(new GridLayout(2, false));
+            @Override
+            public void createControl(Composite parent) {
+                Composite container = new Composite(parent, SWT.NONE);
+                container.setLayout(new GridLayout(2, false));
 
-				// --- Project Name ---
-				new Label(container, SWT.NONE).setText("Project Name:");
-				projectNameText = new Text(container, SWT.BORDER | SWT.SINGLE);
-				projectNameText.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
-				projectNameText.setText(GlistAppNaming.nextAvailable("GlistApp"));
-				projectNameText.addModifyListener(e -> validate());
+                // 1. Project Name Input Field
+                new Label(container, SWT.NONE).setText("Project Name:");
+                projectNameText = new Text(container, SWT.BORDER | SWT.SINGLE);
+                projectNameText.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+                projectNameText.setText(getUniqueProjectName("GlistApp"));
+                projectNameText.addModifyListener(e -> validate());
 
-				// --- Project Type ---
-				new Label(container, SWT.NONE).setText("Project Type:");
-				Group typeGroup = new Group(container, SWT.NONE);
-				typeGroup.setLayout(new GridLayout(3, false));
-				typeGroup.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+                // 2. Project Type Section
+                new Label(container, SWT.NONE).setText("Project Type:");
+                
+                Group typeGroup = new Group(container, SWT.NONE);
+                typeGroup.setLayout(new GridLayout(3, false)); 
+                typeGroup.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
 
-				addTypeRadio(typeGroup, "Game/Graphic App", ProjectType.GAME_GRAPHIC, true);
-				addTypeRadio(typeGroup, "GUI App",          ProjectType.GUI,          false);
-				addTypeRadio(typeGroup, "Console App",      ProjectType.CONSOLE,      false);
+                Button gameGraphicRadio = new Button(typeGroup, SWT.RADIO);
+                gameGraphicRadio.setText("Game/Graphic App");
+                gameGraphicRadio.setSelection(true); 
+                gameGraphicRadio.addSelectionListener(new org.eclipse.swt.events.SelectionAdapter() {
+                    @Override
+                    public void widgetSelected(org.eclipse.swt.events.SelectionEvent e) {
+                        if (gameGraphicRadio.getSelection()) selectedType = ProjectType.GAME_GRAPHIC;
+                    }
+                });
 
-				// --- Plugins ---
-				Label pluginsLabel = new Label(container, SWT.NONE);
-				pluginsLabel.setText("Select Plugins:");
-				GridData labelData = new GridData();
-				labelData.verticalAlignment = SWT.TOP;
-				pluginsLabel.setLayoutData(labelData);
+                Button guiRadio = new Button(typeGroup, SWT.RADIO);
+                guiRadio.setText("GUI App");
+                guiRadio.addSelectionListener(new org.eclipse.swt.events.SelectionAdapter() {
+                    @Override
+                    public void widgetSelected(org.eclipse.swt.events.SelectionEvent e) {
+                        if (guiRadio.getSelection()) selectedType = ProjectType.GUI;
+                    }
+                });
 
-				pluginsTable = new Table(container, SWT.BORDER | SWT.CHECK | SWT.V_SCROLL | SWT.H_SCROLL);
-				GridData tableData = new GridData(GridData.FILL_BOTH);
-				tableData.heightHint = 150;
-				pluginsTable.setLayoutData(tableData);
+                Button consoleRadio = new Button(typeGroup, SWT.RADIO);
+                consoleRadio.setText("Console App");
+                consoleRadio.addSelectionListener(new org.eclipse.swt.events.SelectionAdapter() {
+                    @Override
+                    public void widgetSelected(org.eclipse.swt.events.SelectionEvent e) {
+                        if (consoleRadio.getSelection()) selectedType = ProjectType.CONSOLE;
+                    }
+                });
 
-				pluginsTable.addListener(SWT.MeasureItem, new Listener() {
-					@Override
-					public void handleEvent(Event event) {
-						TableItem item = (TableItem) event.item;
-						String pluginName = item.getText();
-						String description = (String) item.getData("desc");
-						GC gc = event.gc;
-						int nameWidth = gc.textExtent(pluginName).x;
-						int descWidth = description != null && !description.isEmpty()
-								? gc.textExtent(" - " + description).x : 0;
-						event.width = nameWidth + descWidth + 30;
-						event.height = Math.max(event.height, gc.getFontMetrics().getHeight() + 4);
-					}
-				});
-				pluginsTable.addListener(SWT.PaintItem, new Listener() {
-					@Override
-					public void handleEvent(Event event) {
-						TableItem item = (TableItem) event.item;
-						String pluginName = item.getText();
-						String description = (String) item.getData("desc");
-						if (description == null || description.isEmpty()) return;
-						GC gc = event.gc;
-						Point nameExtent = gc.textExtent(pluginName);
-						int startX = event.x + nameExtent.x + 6;
-						int cellHeight = pluginsTable.getItemHeight();
-						int textHeight = nameExtent.y;
-						int startY = event.y + ((cellHeight - textHeight) / 2);
-						Color original = gc.getForeground();
-						Color gray = Display.getDefault().getSystemColor(SWT.COLOR_DARK_GRAY);
-						gc.setForeground(gray);
-						gc.drawString(" - " + description, startX, startY, true);
-						gc.setForeground(original);
-					}
-				});
+                // 3. Plugins Section Label
+                Label pluginsLabel = new Label(container, SWT.NONE);
+                pluginsLabel.setText("Select Plugins:");
+                GridData labelData = new GridData();
+                labelData.verticalAlignment = SWT.TOP;
+                pluginsLabel.setLayoutData(labelData);
 
-				populatePluginsTable();
+                // 4. Plugins Checkbox Table (Single Column Style)
+                pluginsTable = new Table(container, SWT.BORDER | SWT.CHECK | SWT.V_SCROLL | SWT.H_SCROLL);
+                GridData tableData = new GridData(GridData.FILL_BOTH);
+                tableData.heightHint = 150;
+                pluginsTable.setLayoutData(tableData);
 
-				// Spacer under the "Select Plugins:" label so the marketplace link aligns properly.
-				new Label(container, SWT.NONE);
+                // Dynamically gauge cell sizes to prevent text clipping
+                pluginsTable.addListener(SWT.MeasureItem, new Listener() {
+                    @Override
+                    public void handleEvent(Event event) {
+                        TableItem item = (TableItem) event.item;
+                        String pluginName = item.getText();
+                        String description = (String) item.getData("desc");
+                        
+                        GC gc = event.gc;
+                        int nameWidth = gc.textExtent(pluginName).x;
+                        int descWidth = 0;
+                        
+                        if (description != null && !description.isEmpty()) {
+                            descWidth = gc.textExtent(" - " + description).x;
+                        }
+                        
+                        event.width = nameWidth + descWidth + 30; 
+                        event.height = Math.max(event.height, gc.getFontMetrics().getHeight() + 4); 
+                    }
+                });
 
-				Link downloadLink = new Link(container, SWT.NONE);
-				downloadLink.setText("Download more plugins: <a href=\"https://github.com/GlistPlugins\">https://github.com/GlistPlugins</a>");
-				downloadLink.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
-				downloadLink.addSelectionListener(new SelectionAdapter() {
-					@Override
-					public void widgetSelected(SelectionEvent e) {
-						Program.launch(e.text);
-					}
-				});
+                // Advanced Custom Painter: Perfectly centered multi-color rendering
+                pluginsTable.addListener(SWT.PaintItem, new Listener() {
+                    @Override
+                    public void handleEvent(Event event) {
+                        TableItem item = (TableItem) event.item;
+                        String pluginName = item.getText();
+                        String description = (String) item.getData("desc");
 
-				setControl(container);
-				validate();
-			}
+                        if (description != null && !description.isEmpty()) {
+                            GC gc = event.gc;
+                            
+                            Point nameExtent = gc.textExtent(pluginName);
+                            int startX = event.x + nameExtent.x + 6; 
+                            
+                            int cellHeight = pluginsTable.getItemHeight();
+                            int textHeight = nameExtent.y;
+                            int startY = event.y + ((cellHeight - textHeight) / 2);
 
-			private void addTypeRadio(Composite parent, String label, ProjectType type, boolean defaultPick) {
-				Button b = new Button(parent, SWT.RADIO);
-				b.setText(label);
-				b.setSelection(defaultPick);
-				b.addSelectionListener(new SelectionAdapter() {
-					@Override
-					public void widgetSelected(SelectionEvent e) {
-						if (b.getSelection()) selectedType = type;
-					}
-				});
-			}
+                            Color originalColor = gc.getForeground();
+                            Color grayColor = Display.getDefault().getSystemColor(SWT.COLOR_DARK_GRAY);
+                            
+                            gc.setForeground(grayColor);
+                            gc.drawString(" - " + description, startX, startY, true);
+                            gc.setForeground(originalColor);
+                        }
+                    }
+                });
 
-			private void populatePluginsTable() {
-				File pluginsDir = GlistPaths.pluginsRoot().toFile();
-				if (!pluginsDir.isDirectory()) return;
-				File[] entries = pluginsDir.listFiles();
-				if (entries == null) return;
-				for (File entry : entries) {
-					if (!entry.isDirectory()) continue;
-					String folderName = entry.getName();
-					if (folderName.equals("gipEmptyComponent") || folderName.equals("gipEmptyPlugin")) continue;
-					TableItem item = new TableItem(pluginsTable, SWT.NONE);
-					item.setText(folderName);
-					String description = parsePluginDescription(new File(entry, "CMakeLists.txt"));
-					if (!description.isEmpty()) {
-						item.setData("desc", description);
-					}
-				}
-			}
+                populatePluginsTable();
 
-			private String parsePluginDescription(File cmakeFile) {
-				if (!cmakeFile.exists() || !cmakeFile.isFile()) return "";
-				try {
-					String content = Files.readString(cmakeFile.toPath(), StandardCharsets.UTF_8);
-					Pattern p = Pattern.compile(
-							"set\\s*\\(\\s*(projectdescription|plugindescription)\\s+\"?([^\")*]+)\"?",
-							Pattern.CASE_INSENSITIVE);
-					Matcher m = p.matcher(content);
-					if (m.find()) return m.group(2).trim();
-				} catch (IOException ignored) {}
-				return "";
-			}
+                // Spacer for layout alignment
+                new Label(container, SWT.NONE);
 
-			private void validate() {
-				String name = projectNameText.getText().trim();
+                // 5. External Hyperlink Configuration
+                org.eclipse.swt.widgets.Link downloadLink = new org.eclipse.swt.widgets.Link(container, SWT.NONE);
+                downloadLink.setText("Download more plugins: <a href=\"https://github.com/GlistPlugins\">https://github.com/GlistPlugins</a>");
+                downloadLink.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+                downloadLink.addSelectionListener(new org.eclipse.swt.events.SelectionAdapter() {
+                    @Override
+                    public void widgetSelected(org.eclipse.swt.events.SelectionEvent e) {
+                        org.eclipse.swt.program.Program.launch(e.text);
+                    }
+                });
 
-				if (name.isEmpty()) {
-					setErrorMessage("Project name cannot be empty");
-					setPageComplete(false);
-					return;
-				}
-				if (!name.matches("^[a-zA-Z0-9_-]+$")) {
-					setErrorMessage("Only alphanumeric characters, dashes, and underscores are allowed.");
-					setPageComplete(false);
-					return;
-				}
-				if (name.equalsIgnoreCase("glistengine")) {
-					setErrorMessage("The name '" + name + "' is reserved for the core framework and cannot be used.");
-					setPageComplete(false);
-					return;
-				}
+                setControl(container);
+                validate();
+            }
 
-				IProject[] all = ResourcesPlugin.getWorkspace().getRoot().getProjects();
-				for (IProject ws : all) {
-					if (ws.getName().equalsIgnoreCase(name)) {
-						setErrorMessage("A project named '" + ws.getName() + "' already exists in the workspace.");
-						setPageComplete(false);
-						return;
-					}
-				}
-				File appsRoot = GlistPaths.appsRoot().toFile();
-				if (appsRoot.isDirectory()) {
-					File[] siblings = appsRoot.listFiles();
-					if (siblings != null) {
-						for (File s : siblings) {
-							if (s.isDirectory() && s.getName().equalsIgnoreCase(name)) {
-								setErrorMessage("A folder named '" + s.getName() + "' already exists on disk.");
-								setPageComplete(false);
-								return;
-							}
-						}
-					}
-				}
+            private void populatePluginsTable() {
+                File pluginsDir = new File(PLUGINS_ROOT);
+                if (pluginsDir.exists() && pluginsDir.isDirectory()) {
+                    File[] subFiles = pluginsDir.listFiles();
+                    if (subFiles != null) {
+                        for (File file : subFiles) {
+                            if (file.isDirectory()) {
+                                String folderName = file.getName();
+                                if (!folderName.equals("gipEmptyComponent") && !folderName.equals("gipEmptyPlugin")) {
+                                    TableItem item = new TableItem(pluginsTable, SWT.NONE);
+                                    
+                                    item.setText(folderName);
+                                    
+                                    File cmakeFile = new File(file, "CMakeLists.txt");
+                                    String description = parsePluginDescription(cmakeFile);
+                                    
+                                    if (!description.isEmpty()) {
+                                        item.setData("desc", description);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-				setErrorMessage(null);
-				setPageComplete(true);
-			}
-		});
-	}
+            private String parsePluginDescription(File cmakeFile) {
+                if (!cmakeFile.exists() || !cmakeFile.isFile()) {
+                    return "";
+                }
+                try {
+                    String content = Files.readString(cmakeFile.toPath(), StandardCharsets.UTF_8);
+                    Pattern pattern = Pattern.compile("set\\s*\\(\\s*(projectdescription|plugindescription)\\s+\"?([^\")*]+)\"?", Pattern.CASE_INSENSITIVE);
+                    Matcher matcher = pattern.matcher(content);
+                    if (matcher.find()) {
+                        return matcher.group(2).trim();
+                    }
+                } catch (IOException e) {
+                    // Fail silently
+                }
+                return "";
+            }
 
-	@Override
-	public boolean performFinish() {
-		String requestedName = projectNameText.getText().trim();
-		String finalName = GlistAppNaming.nextAvailable(requestedName);
+            private void validate() {
+                String name = projectNameText.getText().trim();
+                
+                if (name.isEmpty()) {
+                    setErrorMessage("Project name cannot be empty");
+                    setPageComplete(false);
+                    return;
+                } 
+                
+                if (!name.matches("^[a-zA-Z0-9_-]+$")) {
+                    setErrorMessage("Only alphanumeric characters, dashes, and underscores are allowed.");
+                    setPageComplete(false);
+                    return;
+                }
 
-		List<String> selectedPlugins = new ArrayList<>();
-		for (TableItem item : pluginsTable.getItems()) {
-			if (item.getChecked()) selectedPlugins.add(item.getText());
-		}
+                if (name.equalsIgnoreCase("glistengine")) {
+                    setErrorMessage("The name '" + name + "' is reserved for the core framework and cannot be used.");
+                    setPageComplete(false);
+                    return;
+                }
 
-		final IProject[] result = new IProject[1];
-		final Exception[] failure = new Exception[1];
+                org.eclipse.core.resources.IProject[] allWorkspaceProjects = ResourcesPlugin.getWorkspace().getRoot().getProjects();
+                for (org.eclipse.core.resources.IProject wsProject : allWorkspaceProjects) {
+                    if (wsProject.getName().equalsIgnoreCase(name)) {
+                        setErrorMessage("A project named '" + wsProject.getName() + "' already exists in the Eclipse workspace.");
+                        setPageComplete(false);
+                        return;
+                    }
+                }
 
-		try {
-			IWorkspaceRunnable op = monitor -> {
-				try {
-					result[0] = GlistAppImporter.importOrCloneApp(finalName, selectedPlugins, monitor);
-				} catch (RuntimeException re) { throw re; }
-				  catch (Exception e) { failure[0] = e; }
-			};
-			ResourcesPlugin.getWorkspace().run(op, new NullProgressMonitor());
-		} catch (Exception e) {
-			failure[0] = e;
-		}
+                File rootDir = new File(DESTINATION_ROOT);
+                if (rootDir.exists() && rootDir.isDirectory()) {
+                    File[] physicalFiles = rootDir.listFiles();
+                    if (physicalFiles != null) {
+                        for (File file : physicalFiles) {
+                            if (file.isDirectory() && file.getName().equalsIgnoreCase(name)) {
+                                setErrorMessage("A folder named '" + file.getName() + "' already exists physically on the disk.");
+                                setPageComplete(false);
+                                return;
+                            }
+                        }
+                    }
+                }
 
-		if (failure[0] != null || result[0] == null) {
-			StringWriter sw = new StringWriter();
-			if (failure[0] != null) failure[0].printStackTrace(new PrintWriter(sw));
-			MessageDialog.openError(
-					getShell(),
-					"Could not create GlistApp",
-					"Failed to create " + finalName + ":\n\n"
-							+ (failure[0] != null ? failure[0].getMessage() : "Unknown error")
-							+ "\n\nCheck that `git` is on PATH and that you have network access.\n\n"
-							+ sw);
-			return false;
-		}
+                setErrorMessage(null);
+                setPageComplete(true);
+            }
+        });
+    }
 
-		// TODO: project type is currently captured but unused — once
-		// GlistGUIApp / GlistConsoleApp upstream repos exist, branch on
-		// selectedType to clone the right one in GlistAppImporter.
-		GlistAppEditors.openCanvas(result[0]);
-		return true;
-	}
+    @Override
+    public boolean performFinish() {
+        try {
+            String requestedName = projectNameText.getText().trim();
+            finalProjectName = getUniqueProjectName(requestedName);
+            File destFolder = new File(DESTINATION_ROOT, finalProjectName);
+
+            // 1. Collect selected plugins
+            List<String> selectedPlugins = new ArrayList<>();
+            for (TableItem item : pluginsTable.getItems()) {
+                if (item.getChecked()) {
+                    selectedPlugins.add(item.getText()); 
+                }
+            }
+
+            // 2. Resolve Dynamic Template Path based on selected Project Type
+            String dynamicTemplatePath = resolveTemplatePath(selectedType);
+
+            // 3. Copy resolved Archetype structure to the destination
+            copyFolder(new File(dynamicTemplatePath).toPath(), destFolder.toPath());
+
+            // 4. Inject Chosen Plugins into CMakeLists.txt dynamically (Only registry injection, no source copying)
+            injectPluginsIntoCMake(new File(destFolder, "CMakeLists.txt"), selectedPlugins);
+
+            // 5. Import the freshly mutated project into Workspace Registry
+            IProject project = importProject(destFolder, finalProjectName);
+
+            // 6. Build dynamic launch runtime parameters
+            createRunConfiguration(project);
+
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private String resolveTemplatePath(ProjectType type) {
+        switch (type) {
+            case GUI:
+                return TEMPLATE_ROOT + File.separator + "GlistGUIApp";
+            case CONSOLE:
+                return TEMPLATE_ROOT + File.separator + "GlistConsoleApp";
+            case GAME_GRAPHIC:
+            default:
+                return TEMPLATE_ROOT + File.separator + "GlistApp";
+        }
+    }
+
+    private void injectPluginsIntoCMake(File cmakeFile, List<String> plugins) throws IOException {
+        if (!cmakeFile.exists() || plugins.isEmpty()) return;
+
+        Path path = cmakeFile.toPath();
+        List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+        List<String> modifiedLines = new ArrayList<>();
+
+        // Merges plugins separated with space; guarantees no trailing space before closing parentheses
+        String pluginString = String.join(" ", plugins);
+
+        for (String line : lines) {
+            if (line.contains("set(PLUGINS")) {
+                // Safeguards both empty set(PLUGINS) and single-spaced set(PLUGINS ) variants for full mapping matches
+                String updatedLine = line.replace("set(PLUGINS)", "set(PLUGINS " + pluginString + ")")
+                                         .replace("set(PLUGINS )", "set(PLUGINS " + pluginString + ")");
+                modifiedLines.add(updatedLine);
+            } else {
+                modifiedLines.add(line);
+            }
+        }
+
+        Files.write(path, modifiedLines, StandardCharsets.UTF_8);
+    }
+
+    private String getUniqueProjectName(String baseName) {
+        File root = new File(DESTINATION_ROOT);
+        if (!root.exists()) root.mkdirs();
+
+        String currentName = baseName;
+        if (new File(root, currentName).exists()) {
+            int counter = 2;
+            while (new File(root, baseName + "-" + counter).exists()) {
+                counter++;
+            }
+            currentName = baseName + "-" + counter;
+        }
+        return currentName;
+    }
+
+    private void copyFolder(Path source, Path target) throws IOException {
+        try (Stream<Path> stream = Files.walk(source)) {
+            stream.forEach(src -> {
+                try {
+                    Path dest = target.resolve(source.relativize(src));
+                    Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
+    }
+
+    private IProject importProject(File projectFolder, String projectName) throws CoreException {
+        org.eclipse.core.runtime.IPath projectDescriptionPath = new org.eclipse.core.runtime.Path(projectFolder.getAbsolutePath()).append(".project");
+        IProjectDescription description = ResourcesPlugin.getWorkspace().loadProjectDescription(projectDescriptionPath);
+        description.setName(projectName);
+
+        IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+        project.create(description, new NullProgressMonitor());
+        project.open(new NullProgressMonitor());
+        return project;
+    }
+
+    private void createRunConfiguration(IProject project) throws CoreException {
+        ILaunchManager manager = DebugPlugin.getDefault().getLaunchManager();
+        ILaunchConfigurationType type = manager.getLaunchConfigurationType("org.eclipse.cdt.launch.applicationLaunchType");
+
+        if (type == null) return;
+
+        ILaunchConfigurationWorkingCopy workingCopy = type.newInstance(null, project.getName());
+        workingCopy.setAttribute("org.eclipse.cdt.launch.PROJECT_ATTR", project.getName());
+        
+        String binaryName = System.getProperty("os.name").toLowerCase().contains("win") ? "GlistApp.exe" : "GlistApp";
+        workingCopy.setAttribute("org.eclipse.cdt.launch.PROGRAM_NAME", "_build/Release/" + binaryName);
+        
+        workingCopy.setAttribute("org.eclipse.add_attr_working_dir", "${project_loc:" + project.getName() + "}");
+        workingCopy.setAttribute("org.eclipse.debug.core.ATTR_WORKING_DIRECTORY", "${project_loc:" + project.getName() + "}");
+        workingCopy.doSave();
+    }
 }
